@@ -31,7 +31,7 @@ jobs:
         with:
           sarif_file: semgrep.sarif
 
-  # FASE 2: Análisis Dependencias (SCA) - Aqua Trivy
+# FASE 2: Análisis Dependencias (SCA) - Aqua Trivy
   fase2-sca-trivy:
     name: "FASE 2: Análisis Dependencias (SCA)"
     runs-on: ubuntu-latest
@@ -39,32 +39,19 @@ jobs:
       - name: Descargar código fuente
         uses: actions/checkout@v4
 
-      - name: Auditoría de paquetes npm y Dockerfile (CVEs)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'table'
-          exit-code: '1'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
-
       - name: Generación de inventario SBOM (CycloneDX)
-        if: always()
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'cyclonedx'
-          output: 'sbom-juiceshop.json'
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" aquasec/trivy:latest fs --format cyclonedx --output /src/sbom-juiceshop.json /src
 
       - name: Guardar artefacto SBOM
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: reporte-sbom
           path: sbom-juiceshop.json
+
+      - name: Auditoría de paquetes npm y Dockerfile (CVEs)
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" aquasec/trivy:latest fs --format table --exit-code 1 --ignore-unfixed --severity CRITICAL,HIGH /src
 
   # FASE 3: Build & Staging Efímero - Docker / OWASP Juice Shop
   fase3-build-staging:
