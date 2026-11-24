@@ -1,0 +1,85 @@
+name: Arquitectura Pipeline DevSecOps (Fases 1 a 3)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # FASE 1: Análisis Estático (SAST) - Semgrep
+  fase1-sast-semgrep:
+    name: "FASE 1: Análisis Estático (SAST)"
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - name: Descargar código fuente
+        uses: actions/checkout@v4
+
+      - name: Escaneo de código fuente (SQLi y XSS)
+        run: |
+          semgrep scan --config p/owasp-top-ten --config p/javascript --config p/typescript --config ./xss-rule.yaml --error --text --sarif -o semgrep.sarif routes frontend/src/app
+
+      - name: Subir reporte SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
+
+  # FASE 2: Análisis Dependencias (SCA) - Aqua Trivy
+  fase2-sca-trivy:
+    name: "FASE 2: Análisis Dependencias (SCA)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código fuente
+        uses: actions/checkout@v4
+
+      - name: Auditoría de paquetes npm y Dockerfile (CVEs)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Generación de inventario SBOM (CycloneDX)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'cyclonedx'
+          output: 'sbom-juiceshop.json'
+
+      - name: Guardar artefacto SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-sbom
+          path: sbom-juiceshop.json
+
+  # FASE 3: Build & Staging Efímero - Docker / OWASP Juice Shop
+  fase3-build-staging:
+    name: "FASE 3: Build & Staging Efímero"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código fuente
+        uses: actions/checkout@v4
+
+      - name: Construcción de imagen Docker
+        run: docker build -t juice-shop-staging .
+
+      - name: Despliegue local en entorno aislado
+        run: |
+          docker run -d --name juice-shop-efimero -p 3000:3000 juice-shop-staging
+          sleep 15
+          docker ps
+          curl -I http://localhost:3000
